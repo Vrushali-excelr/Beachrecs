@@ -1,0 +1,12 @@
+<?php
+$host = 'localhost';    // Your XAMPP MySQL host
+$user = 'root';         // Default XAMPP username
+$pass = '';             // Default XAMPP password (empty by default)
+$db   = 'activity_map'; // Your database name
+
+$conn = new mysqli($host, $user, $pass, $db);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+?>

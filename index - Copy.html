@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activity Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        #map {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+        }
+
+        .sidebar {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 300px;
+            height: 100vh;
+            background-color: #f9fafb;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            transform: translateX(100%);
+        }
+
+        .sidebar.active {
+            transform: translateX(0);
+        }
+
+        .toggle-btn {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1100;
+            background-color: #4a5568;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            border: none;
+        }
+
+        .activity-btn.active, .area-btn.active, .report-btn.active {
+            background-color: #e2e8f0;
+            border-radius: 0.25rem;
+        }
+
+        /* Ensure sidebar content is clickable */
+        .sidebar * {
+            pointer-events: auto;
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: #4a5568;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="map"></div>
+    <div class="sidebar" id="sidebar">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Legend</h2>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Recreational Activities</h3>
+            <div class="space-y-2" id="activities-container">
+                <!-- Activities will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Activity Conditions</h3>
+            <div class="space-y-1" id="conditions-container">
+                <!-- Conditions will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Beach Areas</h3>
+            <div class="space-y-2" id="areas-container">
+                <!-- Beach areas will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">User Report System</h3>
+            <div class="space-y-2" id="reports-container">
+                <!-- Report types will be loaded from database via JavaScript -->
+            </div>
+        </div>
+    </div>
+    <button class="toggle-btn" id="toggleSidebarBtn">Toggle Sidebar</button>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map with proper z-index handling
+        const map = L.map('map', {
+            // This prevents the map from capturing all pointer events
+            tap: false,
+            dragging: true
+        }).setView([15.5515, 73.7520], 15);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Fix for click events passing through the map
+        map.getContainer().style.pointerEvents = 'auto';
+
+        // Toggle sidebar functionality - fixed version
+        document.getElementById('toggleSidebarBtn').addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent event from reaching the map
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+            
+            // Adjust map width when sidebar is open/closed
+            if (sidebar.classList.contains('active')) {
+                document.getElementById('map').style.width = 'calc(100vw - 300px)';
+            } else {
+                document.getElementById('map').style.width = '100vw';
+            }
+        });
+
+        // Sample data - replace with your actual API calls
+        const sampleData = {
+            activities: [
+                {
+                    id: 1,
+                    name: "Swimming",
+                    icon: "https://img.icons8.com/color/48/swimming.png",
+                    latitude: 15.5515,
+                    longitude: 73.7520,
+                    condition: "good",
+                    suitability: "High"
+                },
+                {
+                    id: 2,
+                    name: "Surfing",
+                    icon: "https://img.icons8.com/color/48/surfing.png",
+                    latitude: 15.5520,
+                    longitude: 73.7530,
+                    condition: "fair",
+                    suitability: "Medium"
+                },
+                {
+                    id: 3,
+                    name: "Beach Volleyball",
+                    icon: "https://img.icons8.com/color/48/beach-volleyball.png",
+                    latitude: 15.5500,
+                    longitude: 73.7510,
+                    condition: "excellent",
+                    suitability: "High"
+                }
+            ],
+            conditions: [
+                {
+                    id: 1,
+                    name: "Good",
+                    color: "green",
+                    suitability: "Safe for all activities"
+                },
+                {
+                    id: 2,
+                    name: "Fair",
+                    color: "yellow",
+                    suitability: "Caution advised"
+                },
+                {
+                    id: 3,
+                    name: "Poor",
+                    color: "red",
+                    suitability: "Not recommended"
+                }
+            ],
+            beachAreas: [
+                {
+                    id: 1,
+                    name: "North Beach",
+                    coordinates: '[[15.553,73.751],[15.553,73.754],[15.550,73.754],[15.550,73.751]]',
+                    restricted: false
+                },
+                {
+                    id: 2,
+                    name: "Restricted Zone",
+                    coordinates: '[[15.555,73.755],[15.555,73.758],[15.552,73.758],[15.552,73.755]]',
+                    restricted: true
+                }
+            ],
+            reportTypes: [
+                {
+                    id: 1,
+                    name: "Pollution",
+                    icon: "fa-trash"
+                },
+                {
+                    id: 2,
+                    name: "Dangerous Conditions",
+                    icon: "fa-exclamation-triangle"
+                },
+                {
+                    id: 3,
+                    name: "Wildlife Sighting",
+                    icon: "fa-paw"
+                }
+            ]
+        };
+
+        // Modified data fetch function to use sample data
+        async function fetchData() {
+            try {
+                // Show loading state
+                document.getElementById('activities-container').innerHTML = '<div class="flex items-center"><span class="loading-spinner mr-2"></span> Loading activities...</div>';
+                document.getElementById('conditions-container').innerHTML = '<div class="flex items-center"><span class="loading-spinner mr-2"></span> Loading conditions...</div>';
+                document.getElementById('areas-container').innerHTML = '<div class="flex items-center"><span class="loading-spinner mr-2"></span> Loading beach areas...</div>';
+                document.getElementById('reports-container').innerHTML = '<div class="flex items-center"><span class="loading-spinner mr-2"></span> Loading report types...</div>';
+                
+                // Simulate API delay
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Initialize the application with the sample data
+                initializeApp(
+                    sampleData.activities,
+                    sampleData.conditions,
+                    sampleData.beachAreas,
+                    sampleData.reportTypes
+                );
+            } catch (error) {
+                console.error('Error:', error);
+                // Show error state
+                document.getElementById('activities-container').innerHTML = '<div class="text-red-500">Error loading activities</div>';
+                document.getElementById('conditions-container').innerHTML = '<div class="text-red-500">Error loading conditions</div>';
+                document.getElementById('areas-container').innerHTML = '<div class="text-red-500">Error loading beach areas</div>';
+                document.getElementById('reports-container').innerHTML = '<div class="text-red-500">Error loading report types</div>';
+            }
+        }
+
+        // Initialize the application with data
+        function initializeApp(activities, conditions, beachAreas, reportTypes) {
+            // Populate the sidebar with dynamic data
+            populateSidebar(activities, conditions, beachAreas, reportTypes);
+            
+            // Create activity markers
+            const activityMarkers = createActivityMarkers(activities);
+            
+            // Create beach area polygons
+            const beachAreaLayers = createBeachAreas(beachAreas);
+            
+            // Set up event handlers
+            setupEventHandlers(activityMarkers, beachAreaLayers, reportTypes);
+        }
+
+        // Populate sidebar with dynamic content
+        function populateSidebar(activities, conditions, beachAreas, reportTypes) {
+            // Populate activities
+            const activitiesContainer = document.getElementById('activities-container');
+            activitiesContainer.innerHTML = '';
+            activities.forEach(activity => {
+                const btn = document.createElement('button');
+                btn.className = 'flex items-center text-sm text-blue-600 hover:underline activity-btn w-full text-left p-2';
+                btn.dataset.activity = activity.id;
+                btn.dataset.lat = activity.latitude;
+                btn.dataset.lng = activity.longitude;
+                btn.innerHTML = `
+                    <img src="${activity.icon}" class="mr-2 w-6 h-6"> 
+                    ${activity.name}
+                `;
+                activitiesContainer.appendChild(btn);
+            });
+            
+            // Populate conditions
+            const conditionsContainer = document.getElementById('conditions-container');
+            conditionsContainer.innerHTML = '';
+            conditions.forEach(condition => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <span class="inline-block w-3 h-3 rounded-full mr-2 
+                        ${condition.color === 'green' ? 'bg-green-500' : 
+                          condition.color === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'}"></span>
+                    ${condition.name} (${condition.suitability})
+                `;
+                conditionsContainer.appendChild(div);
+            });
+            
+            // Populate beach areas
+            const areasContainer = document.getElementById('areas-container');
+            areasContainer.innerHTML = '';
+            beachAreas.forEach(area => {
+                const btn = document.createElement('button');
+                btn.className = `flex items-center text-sm ${area.restricted ? 'text-red-600' : 'text-blue-600'} hover:underline area-btn w-full text-left p-2`;
+                btn.dataset.area = area.id;
+                btn.innerHTML = `
+                    <i class="fas ${area.restricted ? 'fa-ban' : 'fa-umbrella-beach'} mr-2"></i>
+                    ${area.name}
+                `;
+                areasContainer.appendChild(btn);
+            });
+            
+            // Populate report types
+            const reportsContainer = document.getElementById('reports-container');
+            reportsContainer.innerHTML = '';
+            reportTypes.forEach(report => {
+                const btn = document.createElement('button');
+                btn.className = 'flex items-center text-sm text-gray-700 hover:underline report-btn w-full text-left p-2';
+                btn.dataset.report = report.id;
+                btn.innerHTML = `
+                    <i class="fas ${report.icon} mr-2"></i>
+                    ${report.name}
+                `;
+                reportsContainer.appendChild(btn);
+            });
+        }
+
+        // Create activity markers
+        function createActivityMarkers(activities) {
+            const markers = {};
+            activities.forEach(activity => {
+                markers[activity.id] = L.marker([activity.latitude, activity.longitude], {
+                    icon: L.icon({ 
+                        iconUrl: activity.icon, 
+                        iconSize: [30, 30] 
+                    })
+                }).bindPopup(`
+                    <b>${activity.name}</b><br>
+                    Condition: ${activity.condition.toUpperCase()}<br>
+                    Suitability: ${activity.suitability}<br>
+                    <button class="mt-2 px-2 py-1 bg-blue-500 text-white rounded fetch-details-btn" 
+                            data-activity="${activity.id}">
+                        View Details
+                    </button>
+                `).addTo(map);
+            });
+            return markers;
+        }
+
+        // Create beach area polygons
+        function createBeachAreas(beachAreas) {
+            const layers = {};
+            beachAreas.forEach(area => {
+                layers[area.id] = L.polygon(
+                    JSON.parse(area.coordinates),
+                    {
+                        color: area.restricted ? 'red' : 'green', 
+                        fillOpacity: 0.1
+                    }
+                ).bindPopup(`
+                    <b>${area.name}</b> ${area.restricted ? '⚠️' : '🏖️'}<br>
+                    <button class="mt-2 px-2 py-1 bg-blue-500 text-white rounded fetch-area-details-btn" 
+                            data-area="${area.id}">
+                        View Details
+                    </button>
+                `);
+            });
+            return layers;
+        }
+
+        // Set up all event handlers
+        function setupEventHandlers(activityMarkers, beachAreaLayers, reportTypes) {
+            // Track currently selected items
+            let selectedActivity = null;
+            let selectedArea = null;
+            
+            // Activity button click handlers
+            document.querySelectorAll('.activity-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    const activityId = this.dataset.activity;
+                    const lat = parseFloat(this.dataset.lat);
+                    const lng = parseFloat(this.dataset.lng);
+                    
+                    // If clicking the same button again, show all activities
+                    if (selectedActivity === activityId) {
+                        document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                        Object.values(activityMarkers).forEach(marker => marker.addTo(map));
+                        selectedActivity = null;
+                        return;
+                    }
+                    
+                    selectedActivity = activityId;
+                    document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+
+                    Object.values(activityMarkers).forEach(marker => map.removeLayer(marker));
+                    activityMarkers[activityId].addTo(map);
+                    map.flyTo([lat, lng], 16);
+                    
+                    // Simulate fetching details
+                    const details = {
+                        name: activityMarkers[activityId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "This is a sample activity description. In a real application, this would come from your database.",
+                        condition: "Good",
+                        suitability: "High",
+                        capacity: "50 people",
+                        current_users: "12 people"
+                    };
+                    
+                    activityMarkers[activityId].setPopupContent(`
+                        <b>${details.name}</b><br>
+                        <p class="my-2">${details.description}</p>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div><b>Condition:</b> ${details.condition}</div>
+                            <div><b>Suitability:</b> ${details.suitability}</div>
+                            <div><b>Capacity:</b> ${details.capacity}</div>
+                            <div><b>Current Users:</b> ${details.current_users}</div>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Beach area toggle functionality
+            document.querySelectorAll('.area-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    const areaId = this.dataset.area;
+                    
+                    if (selectedArea === areaId) {
+                        this.classList.remove('active');
+                        map.removeLayer(beachAreaLayers[areaId]);
+                        selectedArea = null;
+                        return;
+                    }
+                    
+                    selectedArea = areaId;
+                    document.querySelectorAll('.area-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    beachAreaLayers[areaId].addTo(map);
+                    map.fitBounds(beachAreaLayers[areaId].getBounds());
+                    
+                    // Simulate fetching details
+                    const details = {
+                        name: beachAreaLayers[areaId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "This is a sample beach area description. In a real application, this would come from your database.",
+                        restricted: beachAreaLayers[areaId].options.color === 'red',
+                        area_size: "500 sq meters",
+                        facilities: "Restrooms, Showers, Food stands",
+                        safety_level: "High"
+                    };
+                    
+                    beachAreaLayers[areaId].setPopupContent(`
+                        <b>${details.name}</b><br>
+                        <p class="my-2">${details.description}</p>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div><b>Status:</b> ${details.restricted ? 'Restricted' : 'Open'}</div>
+                            <div><b>Area Size:</b> ${details.area_size}</div>
+                            <div><b>Facilities:</b> ${details.facilities}</div>
+                            <div><b>Safety Level:</b> ${details.safety_level}</div>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Report system functionality
+            document.querySelectorAll('.report-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    const reportTypeId = this.dataset.report;
+                    const reportType = reportTypes.find(r => r.id == reportTypeId);
+                    
+                    alert(`Reporting a ${reportType.name} area. Click on the map to place a marker.`);
+                    
+                    map.once('click', async function(e) {
+                        const lat = e.latlng.lat;
+                        const lng = e.latlng.lng;
+                        
+                        // Create marker
+                        const marker = L.marker([lat, lng], { 
+                            icon: L.icon({ 
+                                iconUrl: 'https://img.icons8.com/color/48/report.png', 
+                                iconSize: [30, 30] 
+                            }) 
+                        }).bindPopup(`
+                            <b>Reported as: ${reportType.name}</b><br>
+                            Location: [${lat.toFixed(4)}, ${lng.toFixed(4)}]<br>
+                            <button class="mt-2 px-2 py-1 bg-blue-500 text-white rounded confirm-report-btn" 
+                                    data-report="${reportType.id}" data-lat="${lat}" data-lng="${lng}">
+                                Confirm Report
+                            </button>
+                        `).addTo(map).openPopup();
+                        
+                        // Handle confirm report button
+                        marker.on('popupopen', function() {
+                            document.querySelector('.confirm-report-btn')?.addEventListener('click', async function(e) {
+                                e.stopPropagation();
+                                
+                                try {
+                                    // Simulate API call
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                    
+                                    marker.setPopupContent(`
+                                        <b>Report submitted!</b><br>
+                                        Type: ${reportType.name}<br>
+                                        Location: [${lat.toFixed(4)}, ${lng.toFixed(4)}]<br>
+                                        <small>Thank you for your report</small>
+                                    `).openPopup();
+                                } catch (error) {
+                                    console.error('Error submitting report:', error);
+                                    marker.setPopupContent(`
+                                        <b>Error submitting report</b><br>
+                                        Please try again later
+                                    `).openPopup();
+                                }
+                            });
+                        });
+                    });
+                });
+            });
+        }
+
+        // Start the application by fetching data
+        fetchData();
+    </script>
+</body>
+</html>

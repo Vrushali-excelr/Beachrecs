@@ -1,0 +1,195 @@
+<?php
+// Sample PHP array for activities
+$activities = [
+    "jet-ski" => [
+        "name" => "Jet Ski",
+        "position" => [15.5540, 73.7510],
+        "icon" => "https://img.icons8.com/color/48/jet-ski.png",
+        "condition" => "good",
+        "suitability" => "Fetching..."
+    ],
+    "banana-boat" => [
+        "name" => "Banana Boat",
+        "position" => [15.5532, 73.7535],
+        "icon" => "https://img.icons8.com/color/48/banana-boat.png",
+        "condition" => "moderate",
+        "suitability" => "Fetching..."
+    ],
+    "parasailing" => [
+        "name" => "Parasailing",
+        "position" => [15.5525, 73.7540],
+        "icon" => "https://img.icons8.com/color/48/parasailing.png",
+        "condition" => "good",
+        "suitability" => "Fetching..."
+    ],
+    "scuba" => [
+        "name" => "Scuba Diving",
+        "position" => [15.5490, 73.7500],
+        "icon" => "https://img.icons8.com/color/48/scuba-diving.png",
+        "condition" => "good",
+        "suitability" => "Fetching..."
+    ],
+    "volleyball" => [
+        "name" => "Beach Volleyball",
+        "position" => [15.5520, 73.7530],
+        "icon" => "https://img.icons8.com/color/48/beach-volleyball.png",
+        "condition" => "moderate",
+        "suitability" => "Fetching..."
+    ]
+];
+
+// Convert PHP array to JSON for use in JavaScript
+$activities_json = json_encode($activities);
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activity Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        body {
+            overflow-x: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+            position: absolute;
+            z-index: 0;
+        }
+
+        .sidebar {
+            position: fixed;
+            height: 100vh;
+            width: 300px;
+            background-color: #f9fafb;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+            right: 0;
+            top: 0;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            transform: translateX(100%);
+        }
+
+        .sidebar.active {
+            transform: translateX(0);
+        }
+
+        .toggle-btn {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1100;
+            background-color: #4a5568;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            border: none;
+        }
+
+        .activity-btn.active {
+            background-color: #e2e8f0;
+            border-radius: 0.25rem;
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="map"></div>
+    <div class="sidebar" id="sidebar">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Legend</h2>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Recreational Activities</h3>
+            <div class="space-y-2" id="activity-list">
+                <!-- PHP will dynamically generate the buttons here -->
+                <?php foreach ($activities as $id => $activity): ?>
+                    <button class="flex items-center text-sm text-blue-600 hover:underline activity-btn" data-activity="<?= $id ?>">
+                        <img src="<?= $activity['icon'] ?>" class="mr-2"> <?= $activity['name'] ?>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+
+    <button class="toggle-btn" id="toggleSidebarBtn">Toggle Sidebar</button>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([15.5515, 73.7520], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Convert PHP activities array to JavaScript
+        const activities = <?php echo $activities_json; ?>;
+
+        // Toggle sidebar functionality
+        const toggleButton = document.getElementById('toggleSidebarBtn');
+        const sidebar = document.getElementById('sidebar');
+        const mapContainer = document.getElementById('map');
+
+        toggleButton.addEventListener('click', function() {
+            sidebar.classList.toggle('active');
+            
+            // Adjust map width when sidebar is open or closed
+            if (sidebar.classList.contains('active')) {
+                mapContainer.style.width = 'calc(100% - 300px)';
+            } else {
+                mapContainer.style.width = '100%';
+            }
+        });
+
+        // Create activity markers
+        const activityMarkers = {};
+        Object.entries(activities).forEach(([id, activity]) => {
+            activityMarkers[id] = L.marker(activity.position, {
+                icon: L.icon({ iconUrl: activity.icon, iconSize: [30, 30] })
+            }).bindPopup(`<b>${activity.name}</b><br>Condition: ${activity.condition.toUpperCase()}<br>Suitability: ${activity.suitability}`).addTo(map);
+        });
+
+        // Track currently selected activity
+        let selectedActivity = null;
+
+        // Activity button click handlers
+        document.querySelectorAll('.activity-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const activityId = btn.dataset.activity;
+                
+                // If clicking the same button again, show all activities
+                if (selectedActivity === activityId) {
+                    // Remove active class from all buttons
+                    document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                    // Show all activities
+                    Object.values(activityMarkers).forEach(marker => marker.addTo(map));
+                    selectedActivity = null;
+                    return;
+                }
+                
+                // Set the new selected activity
+                selectedActivity = activityId;
+                
+                // Update button states
+                document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Hide all activities
+                Object.values(activityMarkers).forEach(marker => map.removeLayer(marker));
+                // Show only the selected activity
+                activityMarkers[activityId].addTo(map);
+                map.setView(activityMarkers[activityId].getLatLng(), 16);
+            });
+        });
+
+    </script>
+</body>
+</html>

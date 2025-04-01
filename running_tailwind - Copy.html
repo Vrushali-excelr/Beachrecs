@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activity Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        #map {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+        }
+
+        .sidebar {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 300px;
+            height: 100vh;
+            background-color: #f9fafb;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            transform: translateX(100%);
+        }
+
+        .sidebar.active {
+            transform: translateX(0);
+        }
+
+        .toggle-btn {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1100;
+            background-color: #4a5568;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            border: none;
+        }
+
+        .activity-btn.active, .area-btn.active, .report-btn.active {
+            background-color: #e2e8f0;
+            border-radius: 0.25rem;
+        }
+
+        /* Ensure sidebar content is clickable */
+        .sidebar * {
+            pointer-events: auto;
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: #4a5568;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Crowded area indicator */
+        .crowded-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .crowded-1 { background-color: #10B981; } /* Green - Not crowded */
+        .crowded-2 { background-color: #F59E0B; } /* Yellow - Moderate */
+        .crowded-3 { background-color: #EF4444; } /* Red - Very crowded */
+
+        /* Database query styling */
+        .query-log {
+            font-family: monospace;
+            background-color: #f3f4f6;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin: 4px 0;
+            color: #374151;
+        }
+
+        .db-response {
+            border-left: 3px solid #4b5563;
+            padding-left: 8px;
+            margin: 8px 0;
+            background-color: #f9fafb;
+            padding: 6px;
+        }
+        
+        /* Visitor counter */
+        .visitor-count {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-left: auto;
+        }
+        
+        /* Activity popularity indicator */
+        .popularity-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        
+        .popularity-high { background-color: #EF4444; }
+        .popularity-medium { background-color: #F59E0B; }
+        .popularity-low { background-color: #10B981; }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="map"></div>
+    <div class="sidebar" id="sidebar">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Legend</h2>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Recreational Activities</h3>
+            <div class="space-y-2" id="activities-container">
+                <!-- Activities will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Facilities</h3>
+            <div class="space-y-2" id="facilities-container">
+                <!-- Facilities will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Activity Conditions</h3>
+            <div class="space-y-1" id="conditions-container">
+                <!-- Conditions will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Beach Areas</h3>
+            <div class="space-y-2" id="areas-container">
+                <!-- Beach areas will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">Crowded Areas</h3>
+            <div class="space-y-2" id="crowded-container">
+                <!-- Crowded areas will be loaded from database via JavaScript -->
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <h3 class="text-lg font-medium mb-2 text-gray-700">User Report System</h3>
+            <div class="space-y-2" id="reports-container">
+                <!-- Report types will be loaded from database via JavaScript -->
+            </div>
+        </div>
+    </div>
+    <button class="toggle-btn" id="toggleSidebarBtn">Toggle Sidebar</button>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map with proper z-index handling
+        const map = L.map('map', {
+            // This prevents the map from capturing all pointer events
+            tap: false,
+            dragging: true
+        }).setView([15.5515, 73.7520], 15);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Fix for click events passing through the map
+        map.getContainer().style.pointerEvents = 'auto';
+
+        // Track report count
+        let reportCount = 0;
+        const maxReports = 3;
+        
+        // Track visitor counts in localStorage
+        function getVisitorCounts() {
+            const counts = localStorage.getItem('visitorCounts');
+            return counts ? JSON.parse(counts) : {};
+        }
+        
+        function updateVisitorCount(activityId, increment = true) {
+            const counts = getVisitorCounts();
+            if (!counts[activityId]) {
+                counts[activityId] = 0;
+            }
+            if (increment) {
+                counts[activityId]++;
+            }
+            localStorage.setItem('visitorCounts', JSON.stringify(counts));
+            return counts[activityId];
+        }
+        
+        function getPopularityLevel(count) {
+            if (count > 100) return { class: 'popularity-high', text: 'High' };
+            if (count > 50) return { class: 'popularity-medium', text: 'Medium' };
+            return { class: 'popularity-low', text: 'Low' };
+        }
+
+        // Toggle sidebar functionality - fixed version
+        document.getElementById('toggleSidebarBtn').addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent event from reaching the map
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('active');
+            
+            // Adjust map width when sidebar is open/closed
+            if (sidebar.classList.contains('active')) {
+                document.getElementById('map').style.width = 'calc(100vw - 300px)';
+            } else {
+                document.getElementById('map').style.width = '100vw';
+            }
+        });
+
+        // Sample data - replace with your actual API calls
+        const sampleData = {
+            activities: [
+                {
+                    id: 1,
+                    name: "Swimming",
+                    icon: "https://img.icons8.com/color/48/swimming.png",
+                    latitude: 15.5515,
+                    longitude: 73.7520,
+                    condition: "good",
+                    suitability: "High",
+                    color: "#3B82F6", // Blue
+                    baseVisitors: Math.floor(Math.random() * 100) + 50 // Random base count between 50-150
+                },
+                {
+                    id: 2,
+                    name: "Surfing",
+                    icon: "https://img.icons8.com/color/48/surfing.png",
+                    latitude: 15.5520,
+                    longitude: 73.7530,
+                    condition: "fair",
+                    suitability: "Medium",
+                    color: "#10B981", // Green
+                    baseVisitors: Math.floor(Math.random() * 80) + 30 // Random base count between 30-110
+                },
+                {
+                    id: 3,
+                    name: "Beach Volleyball",
+                    icon: "https://img.icons8.com/color/48/beach-volleyball.png",
+                    latitude: 15.5500,
+                    longitude: 73.7510,
+                    condition: "excellent",
+                    suitability: "High",
+                    color: "#F59E0B", // Yellow
+                    baseVisitors: Math.floor(Math.random() * 60) + 20 // Random base count between 20-80
+                },
+                {
+                    id: 4,
+                    name: "Jet Skiing",
+                    icon: "https://img.icons8.com/color/48/jet-ski.png",
+                    latitude: 15.5530,
+                    longitude: 73.7540,
+                    condition: "good",
+                    suitability: "High",
+                    color: "#6366F1", // Indigo
+                    baseVisitors: Math.floor(Math.random() * 40) + 10 // Random base count between 10-50
+                },
+                {
+                    id: 5,
+                    name: "Paragliding",
+                    icon: "https://img.icons8.com/color/48/paragliding.png",
+                    latitude: 15.5540,
+                    longitude: 73.7550,
+                    condition: "good",
+                    suitability: "Medium",
+                    color: "#EC4899", // Pink
+                    baseVisitors: Math.floor(Math.random() * 30) + 5 // Random base count between 5-35
+                },
+                {
+                    id: 6,
+                    name: "Scuba Diving",
+                    icon: "https://img.icons8.com/color/48/scuba-diving.png",
+                    latitude: 15.5490,
+                    longitude: 73.7560,
+                    condition: "excellent",
+                    suitability: "High",
+                    color: "#06B6D4", // Cyan
+                    baseVisitors: Math.floor(Math.random() * 50) + 15 // Random base count between 15-65
+                },
+                {
+                    id: 7,
+                    name: "Fishing",
+                    icon: "https://img.icons8.com/color/48/fishing.png",
+                    latitude: 15.5480,
+                    longitude: 73.7500,
+                    condition: "good",
+                    suitability: "High",
+                    color: "#8B5CF6", // Purple
+                    baseVisitors: Math.floor(Math.random() * 70) + 25 // Random base count between 25-95
+                }
+            ],
+            facilities: [
+                {
+                    id: 1,
+                    name: "Parking",
+                    icon: "fa-parking",
+                    latitude: 15.5525,
+                    longitude: 73.7505,
+                    status: "available",
+                    color: "#4B5563", // Gray
+                    baseVisitors: Math.floor(Math.random() * 200) + 100 // Random base count between 100-300
+                },
+                {
+                    id: 2,
+                    name: "Restrooms",
+                    icon: "fa-restroom",
+                    latitude: 15.5510,
+                    longitude: 73.7515,
+                    status: "available",
+                    color: "#F97316", // Orange
+                    baseVisitors: Math.floor(Math.random() * 300) + 150 // Random base count between 150-450
+                }
+            ],
+            conditions: [
+                {
+                    id: 1,
+                    name: "Good",
+                    color: "green",
+                    suitability: "Safe for all activities"
+                },
+                {
+                    id: 2,
+                    name: "Fair",
+                    color: "yellow",
+                    suitability: "Caution advised"
+                },
+                {
+                    id: 3,
+                    name: "Poor",
+                    color: "red",
+                    suitability: "Not recommended"
+                }
+            ],
+            beachAreas: [
+                {
+                    id: 1,
+                    name: "North Beach",
+                    coordinates: '[[15.553,73.751],[15.553,73.754],[15.550,73.754],[15.550,73.751],[15.551,73.751],[15.552,73.752],[15.553,73.751]]',
+                    restricted: false,
+                    color: "#10B981", // Green
+                    baseVisitors: Math.floor(Math.random() * 500) + 200 // Random base count between 200-700
+                },
+                {
+                    id: 2,
+                    name: "Restricted Zone",
+                    coordinates: '[[15.555,73.755],[15.555,73.758],[15.552,73.758],[15.552,73.755],[15.553,73.756],[15.554,73.757],[15.555,73.755]]',
+                    restricted: true,
+                    color: "#EF4444", // Red
+                    baseVisitors: Math.floor(Math.random() * 20) + 5 // Random base count between 5-25
+                },
+                {
+                    id: 3,
+                    name: "Dangerous Waters",
+                    coordinates: '[[15.547,73.749],[15.547,73.753],[15.544,73.753],[15.544,73.749],[15.545,73.750],[15.546,73.751],[15.547,73.749]]',
+                    restricted: true,
+                    color: "#EF4444", // Red
+                    baseVisitors: Math.floor(Math.random() * 15) + 2 // Random base count between 2-17
+                }
+            ],
+            crowdedAreas: [
+                {
+                    id: 1,
+                    name: "Main Beach Area",
+                    coordinates: '[[15.551,73.752],[15.551,73.755],[15.549,73.755],[15.549,73.752],[15.550,73.753],[15.5505,73.754],[15.551,73.752]]',
+                    level: 3, // 1=low, 2=medium, 3=high
+                    color: "#EF4444", // Red
+                    baseVisitors: Math.floor(Math.random() * 400) + 300 // Random base count between 300-700
+                },
+                {
+                    id: 2,
+                    name: "Quiet Cove",
+                    coordinates: '[[15.548,73.749],[15.548,73.751],[15.546,73.751],[15.546,73.749],[15.547,73.750],[15.5475,73.7505],[15.548,73.749]]',
+                    level: 1, // 1=low, 2=medium, 3=high
+                    color: "#10B981", // Green
+                    baseVisitors: Math.floor(Math.random() * 100) + 20 // Random base count between 20-120
+                },
+                {
+                    id: 3,
+                    name: "Popular Swimming Spot",
+                    coordinates: '[[15.552,73.753],[15.552,73.756],[15.549,73.756],[15.549,73.753],[15.550,73.754],[15.551,73.755],[15.552,73.753]]',
+                    level: 3, // 1=low, 2=medium, 3=high
+                    color: "#EF4444", // Red
+                    baseVisitors: Math.floor(Math.random() * 350) + 250 // Random base count between 250-600
+                }
+            ],
+            reportTypes: [
+                {
+                    id: 1,
+                    name: "Pollution",
+                    icon: "fa-trash",
+                    color: "#6B7280" // Gray
+                },
+                {
+                    id: 2,
+                    name: "Dangerous Conditions",
+                    icon: "fa-exclamation-triangle",
+                    color: "#EF4444" // Red
+                },
+                {
+                    id: 3,
+                    name: "Wildlife Sighting",
+                    icon: "fa-paw",
+                    color: "#10B981" // Green
+                }
+            ]
+        };
+
+        // Modified data fetch function to use sample data
+        async function fetchData() {
+            try {
+                // Show loading state with database-like messages
+                document.getElementById('activities-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Loading recreational activities data...</span>
+                    </div>`;
+                document.getElementById('facilities-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Retrieving facility information...</span>
+                    </div>`;
+                document.getElementById('conditions-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Checking current conditions...</span>
+                    </div>`;
+                document.getElementById('areas-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Loading beach zone data...</span>
+                    </div>`;
+                document.getElementById('crowded-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Analyzing crowd density...</span>
+                    </div>`;
+                document.getElementById('reports-container').innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading-spinner mr-2"></span> 
+                        <span class="query-log">Initializing reporting system...</span>
+                    </div>`;
+                
+                // Simulate API delay with database connection messages
+                await new Promise(resolve => setTimeout(resolve, 800));
+                
+                // Initialize the application with the sample data
+                initializeApp(
+                    sampleData.activities,
+                    sampleData.facilities,
+                    sampleData.conditions,
+                    sampleData.beachAreas,
+                    sampleData.crowdedAreas,
+                    sampleData.reportTypes
+                );
+            } catch (error) {
+                console.error('Error:', error);
+                // Show error state with database error messages
+                document.getElementById('activities-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">Error loading activities data</div>
+                        Failed to load recreational activities
+                    </div>`;
+                document.getElementById('facilities-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">Connection timeout</div>
+                        Facility data unavailable
+                    </div>`;
+                document.getElementById('conditions-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">Service unavailable</div>
+                        Conditions data not available
+                    </div>`;
+                document.getElementById('areas-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">Data format error</div>
+                        Beach zone data corrupted
+                    </div>`;
+                document.getElementById('crowded-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">Service unavailable</div>
+                        Crowd data service down
+                    </div>`;
+                document.getElementById('reports-container').innerHTML = `
+                    <div class="text-red-500">
+                        <div class="query-log bg-red-100">System error</div>
+                        Report system offline
+                    </div>`;
+            }
+        }
+
+        // Initialize the application with data
+        function initializeApp(activities, facilities, conditions, beachAreas, crowdedAreas, reportTypes) {
+            // Populate the sidebar with dynamic data
+            populateSidebar(activities, facilities, conditions, beachAreas, crowdedAreas, reportTypes);
+            
+            // Create activity markers
+            const activityMarkers = createActivityMarkers(activities);
+            
+            // Create facility markers
+            const facilityMarkers = createFacilityMarkers(facilities);
+            
+            // Create beach area polygons
+            const beachAreaLayers = createBeachAreas(beachAreas);
+            
+            // Create crowded area polygons
+            const crowdedAreaLayers = createCrowdedAreas(crowdedAreas);
+            
+            // Set up event handlers
+            setupEventHandlers(activityMarkers, facilityMarkers, beachAreaLayers, crowdedAreaLayers, reportTypes);
+        }
+
+        // Populate sidebar with dynamic content
+        function populateSidebar(activities, facilities, conditions, beachAreas, crowdedAreas, reportTypes) {
+            // Populate activities
+            const activitiesContainer = document.getElementById('activities-container');
+            activitiesContainer.innerHTML = `
+                <div class="query-log mb-2">Found ${activities.length} activities</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Activity data loaded successfully
+                </div>`;
+            activities.forEach(activity => {
+                const visitorCount = updateVisitorCount(activity.id, false) + activity.baseVisitors;
+                const popularity = getPopularityLevel(visitorCount);
+                
+                const btn = document.createElement('button');
+                btn.className = 'flex items-center text-sm hover:underline activity-btn w-full text-left p-2';
+                btn.style.color = activity.color;
+                btn.dataset.activity = activity.id;
+                btn.dataset.lat = activity.latitude;
+                btn.dataset.lng = activity.longitude;
+                btn.innerHTML = `
+                    <img src="${activity.icon}" class="mr-2 w-6 h-6"> 
+                    ${activity.name}
+                    <span class="visitor-count">
+                        <span class="popularity-indicator ${popularity.class}"></span>
+                        ${visitorCount} visits
+                    </span>
+                `;
+                activitiesContainer.appendChild(btn);
+            });
+            
+            // Populate facilities
+            const facilitiesContainer = document.getElementById('facilities-container');
+            facilitiesContainer.innerHTML = `
+                <div class="query-log mb-2">Found ${facilities.length} facilities</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Facility data loaded successfully
+                </div>`;
+            facilities.forEach(facility => {
+                const visitorCount = facility.baseVisitors;
+                
+                const btn = document.createElement('button');
+                btn.className = 'flex items-center text-sm hover:underline facility-btn w-full text-left p-2';
+                btn.style.color = facility.color;
+                btn.dataset.facility = facility.id;
+                btn.dataset.lat = facility.latitude;
+                btn.dataset.lng = facility.longitude;
+                btn.innerHTML = `
+                    <i class="fas ${facility.icon} mr-2"></i>
+                    ${facility.name}
+                    <span class="visitor-count ml-auto">${visitorCount} uses</span>
+                `;
+                facilitiesContainer.appendChild(btn);
+            });
+            
+            // Populate conditions
+            const conditionsContainer = document.getElementById('conditions-container');
+            conditionsContainer.innerHTML = `
+                <div class="query-log mb-2">Current conditions assessment</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Conditions data loaded successfully
+                </div>`;
+            conditions.forEach(condition => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <span class="inline-block w-3 h-3 rounded-full mr-2 
+                        ${condition.color === 'green' ? 'bg-green-500' : 
+                          condition.color === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'}"></span>
+                    ${condition.name} (${condition.suitability})
+                `;
+                conditionsContainer.appendChild(div);
+            });
+            
+            // Populate beach areas
+            const areasContainer = document.getElementById('areas-container');
+            areasContainer.innerHTML = `
+                <div class="query-log mb-2">Loaded ${beachAreas.length} beach zones</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Beach zone data loaded successfully
+                </div>`;
+            beachAreas.forEach(area => {
+                const visitorCount = area.baseVisitors;
+                
+                const btn = document.createElement('button');
+                btn.className = `flex items-center text-sm hover:underline area-btn w-full text-left p-2`;
+                btn.style.color = area.color;
+                btn.dataset.area = area.id;
+                btn.innerHTML = `
+                    <i class="fas ${area.restricted ? 'fa-ban' : 'fa-umbrella-beach'} mr-2"></i>
+                    ${area.name}
+                    <span class="visitor-count ml-auto">${visitorCount} visits</span>
+                `;
+                areasContainer.appendChild(btn);
+            });
+            
+            // Populate crowded areas
+            const crowdedContainer = document.getElementById('crowded-container');
+            crowdedContainer.innerHTML = `
+                <div class="query-log mb-2">Crowd density analysis</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Crowd data loaded successfully
+                </div>`;
+            crowdedAreas.forEach(area => {
+                const visitorCount = area.baseVisitors;
+                
+                const btn = document.createElement('button');
+                btn.className = `flex items-center text-sm hover:underline crowded-btn w-full text-left p-2`;
+                btn.style.color = area.color;
+                btn.dataset.crowded = area.id;
+                btn.innerHTML = `
+                    <span class="crowded-indicator crowded-${area.level}"></span>
+                    ${area.name}
+                    <span class="visitor-count ml-auto">${visitorCount} people</span>
+                `;
+                crowdedContainer.appendChild(btn);
+            });
+            
+            // Populate report types
+            const reportsContainer = document.getElementById('reports-container');
+            reportsContainer.innerHTML = `
+                <div class="query-log mb-2">Report categories available</div>
+                <div class="db-response">
+                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                    Report system initialized
+                </div>`;
+            reportTypes.forEach(report => {
+                const btn = document.createElement('button');
+                btn.className = 'flex items-center text-sm hover:underline report-btn w-full text-left p-2';
+                btn.style.color = report.color;
+                btn.dataset.report = report.id;
+                btn.innerHTML = `
+                    <i class="fas ${report.icon} mr-2"></i>
+                    ${report.name}
+                `;
+                reportsContainer.appendChild(btn);
+            });
+        }
+
+        // Create activity markers
+        function createActivityMarkers(activities) {
+            const markers = {};
+            activities.forEach(activity => {
+                const visitorCount = updateVisitorCount(activity.id, false) + activity.baseVisitors;
+                const popularity = getPopularityLevel(visitorCount);
+                
+                markers[activity.id] = L.marker([activity.latitude, activity.longitude], {
+                    icon: L.icon({ 
+                        iconUrl: activity.icon, 
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    })
+                }).bindPopup(`
+                    <div style="border-left: 4px solid ${activity.color}; padding-left: 8px;">
+                        <b>${activity.name}</b><br>
+                        Condition: ${activity.condition.toUpperCase()}<br>
+                        Suitability: ${activity.suitability}<br>
+                        <div class="text-sm mt-1">
+                            <i class="fas fa-users mr-1"></i> 
+                            Total visited: ${visitorCount} 
+                            <span class="popularity-indicator ${popularity.class}"></span>
+                            <span>${popularity.text} popularity</span>
+                        </div>
+                        <button class="mt-2 px-2 py-1 text-white rounded fetch-details-btn" 
+                                style="background-color: ${activity.color}"
+                                data-activity="${activity.id}">
+                            <i class="fas fa-sync-alt mr-1"></i> Refresh Live Data
+                        </button>
+                    </div>
+                `).addTo(map);
+            });
+            return markers;
+        }
+
+        // Create facility markers
+        function createFacilityMarkers(facilities) {
+            const markers = {};
+            facilities.forEach(facility => {
+                markers[facility.id] = L.marker([facility.latitude, facility.longitude], {
+                    icon: L.divIcon({
+                        html: `<i class="fas ${facility.icon}" style="color: ${facility.color}; font-size: 24px;"></i>`,
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12],
+                        className: 'facility-icon'
+                    })
+                }).bindPopup(`
+                    <div style="border-left: 4px solid ${facility.color}; padding-left: 8px;">
+                        <b>${facility.name}</b><br>
+                        Status: ${facility.status.toUpperCase()}<br>
+                        <div class="text-sm mt-1"><i class="fas fa-users mr-1"></i> Total uses: ${facility.baseVisitors}</div>
+                        <button class="mt-2 px-2 py-1 text-white rounded fetch-details-btn" 
+                                style="background-color: ${facility.color}"
+                                data-facility="${facility.id}">
+                            <i class="fas fa-info-circle mr-1"></i> View Details
+                        </button>
+                    </div>
+                `).addTo(map);
+            });
+            return markers;
+        }
+
+        // Create beach area polygons
+        function createBeachAreas(beachAreas) {
+            const layers = {};
+            beachAreas.forEach(area => {
+                layers[area.id] = L.polygon(
+                    JSON.parse(area.coordinates),
+                    {
+                        color: area.color, 
+                        fillOpacity: 0.2,
+                        weight: 2
+                    }
+                ).bindPopup(`
+                    <div style="border-left: 4px solid ${area.color}; padding-left: 8px;">
+                        <b>${area.name}</b> ${area.restricted ? '⚠️' : '🏖️'}<br>
+                        <div class="text-sm mt-1"><i class="fas fa-users mr-1"></i> Total visits: ${area.baseVisitors}</div>
+                        <button class="mt-2 px-2 py-1 text-white rounded fetch-area-details-btn" 
+                                style="background-color: ${area.color}"
+                                data-area="${area.id}">
+                            <i class="fas fa-map-marked-alt mr-1"></i> Get Zone Analytics
+                        </button>
+                    </div>
+                `);
+            });
+            return layers;
+        }
+
+        // Create crowded area polygons
+        function createCrowdedAreas(crowdedAreas) {
+            const layers = {};
+            crowdedAreas.forEach(area => {
+                layers[area.id] = L.polygon(
+                    JSON.parse(area.coordinates),
+                    {
+                        color: area.color,
+                        fillOpacity: 0.3,
+                        weight: 2,
+                        dashArray: '5, 5'
+                    }
+                ).bindPopup(`
+                    <div style="border-left: 4px solid ${area.color}; padding-left: 8px;">
+                        <b>${area.name}</b><br>
+                        Crowd Level: ${area.level === 1 ? 'Low' : area.level === 2 ? 'Medium' : 'High'}<br>
+                        <div class="text-sm mt-1"><i class="fas fa-users mr-1"></i> People today: ${area.baseVisitors}</div>
+                        <button class="mt-2 px-2 py-1 text-white rounded fetch-crowded-details-btn" 
+                                style="background-color: ${area.color}"
+                                data-crowded="${area.id}">
+                            <i class="fas fa-users mr-1"></i> Update Crowd Metrics
+                        </button>
+                    </div>
+                `);
+            });
+            return layers;
+        }
+
+        // Set up all event handlers
+        function setupEventHandlers(activityMarkers, facilityMarkers, beachAreaLayers, crowdedAreaLayers, reportTypes) {
+            // Track currently selected items
+            let selectedActivity = null;
+            let selectedFacility = null;
+            let selectedArea = null;
+            let selectedCrowdedArea = null;
+            
+            // Activity button click handlers
+            document.querySelectorAll('.activity-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    const activityId = this.dataset.activity;
+                    const lat = parseFloat(this.dataset.lat);
+                    const lng = parseFloat(this.dataset.lng);
+                    const color = this.style.color;
+                    const activity = sampleData.activities.find(a => a.id == activityId);
+                    
+                    // Increment visitor count when clicked
+                    const visitorCount = updateVisitorCount(activityId) + activity.baseVisitors;
+                    const popularity = getPopularityLevel(visitorCount);
+                    
+                    // Update the button text with new count
+                    const visitorSpan = this.querySelector('.visitor-count');
+                    if (visitorSpan) {
+                        visitorSpan.innerHTML = `
+                            <span class="popularity-indicator ${popularity.class}"></span>
+                            ${visitorCount} visits
+                        `;
+                    }
+                    
+                    // If clicking the same button again, show all activities
+                    if (selectedActivity === activityId) {
+                        document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                        Object.values(activityMarkers).forEach(marker => marker.addTo(map));
+                        selectedActivity = null;
+                        return;
+                    }
+                    
+                    selectedActivity = activityId;
+                    document.querySelectorAll('.activity-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+
+                    Object.values(activityMarkers).forEach(marker => map.removeLayer(marker));
+                    activityMarkers[activityId].addTo(map);
+                    map.flyTo([lat, lng], 16);
+                    
+                    // Simulate fetching details from database
+                    const details = {
+                        name: activityMarkers[activityId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "Current activity data retrieved from recreation database. Updated every 15 minutes.",
+                        condition: "Good",
+                        suitability: "High",
+                        capacity: "50 people",
+                        current_users: "12 people",
+                        last_updated: new Date().toLocaleTimeString(),
+                        water_temp: "28°C",
+                        wave_height: "1.2m",
+                        visitorCount: visitorCount,
+                        popularity: popularity
+                    };
+                    
+                    activityMarkers[activityId].setPopupContent(`
+                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                            <b>${details.name}</b><br>
+                            <div class="query-log mt-1">
+                                <i class="fas fa-spinner fa-spin mr-1"></i>
+                                Loading latest activity data...
+                            </div>
+                            <div class="db-response mt-2">
+                                <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                                ${details.description}
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 mt-3">
+                                <div><b>Condition:</b> ${details.condition}</div>
+                                <div><b>Suitability:</b> ${details.suitability}</div>
+                                <div><b>Capacity:</b> ${details.capacity}</div>
+                                <div><b>Current Users:</b> ${details.current_users}</div>
+                                <div><b>Water Temp:</b> ${details.water_temp}</div>
+                                <div><b>Wave Height:</b> ${details.wave_height}</div>
+                            </div>
+                            <div class="text-sm mt-2">
+                                <i class="fas fa-users mr-1"></i> 
+                                Total visited: ${details.visitorCount} 
+                                <span class="popularity-indicator ${details.popularity.class}"></span>
+                                <span>${details.popularity.text} popularity</span>
+                            </div>
+                            <div class="query-log mt-2">
+                                <i class="fas fa-clock mr-1"></i>
+                                Last updated: ${details.last_updated}
+                            </div>
+                            <button class="mt-2 px-2 py-1 text-white rounded w-full" 
+                                    style="background-color: ${color}">
+                                <i class="fas fa-sync-alt mr-1"></i> Refresh Data
+                            </button>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Facility button click handlers
+            document.querySelectorAll('.facility-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation();
+                    
+                    const facilityId = this.dataset.facility;
+                    const lat = parseFloat(this.dataset.lat);
+                    const lng = parseFloat(this.dataset.lng);
+                    const color = this.style.color;
+                    const facility = sampleData.facilities.find(f => f.id == facilityId);
+                    
+                    if (selectedFacility === facilityId) {
+                        document.querySelectorAll('.facility-btn').forEach(b => b.classList.remove('active'));
+                        Object.values(facilityMarkers).forEach(marker => marker.addTo(map));
+                        selectedFacility = null;
+                        return;
+                    }
+                    
+                    selectedFacility = facilityId;
+                    document.querySelectorAll('.facility-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+
+                    Object.values(facilityMarkers).forEach(marker => map.removeLayer(marker));
+                    facilityMarkers[facilityId].addTo(map);
+                    map.flyTo([lat, lng], 16);
+                    
+                    // Simulate fetching details from database
+                    const details = {
+                        name: facilityMarkers[facilityId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "Facility information loaded from amenities management system. Real-time status updates available.",
+                        status: "Available",
+                        hours: "8:00 AM - 8:00 PM",
+                        capacity: "20 vehicles",
+                        current_usage: "12 vehicles",
+                        last_maintenance: "2023-06-15",
+                        next_inspection: "2023-09-15",
+                        usersVisited: facility.baseVisitors
+                    };
+                    
+                    facilityMarkers[facilityId].setPopupContent(`
+                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                            <b>${details.name}</b><br>
+                            <div class="query-log mt-1">
+                                <i class="fas fa-spinner fa-spin mr-1"></i>
+                                Loading facility information...
+                            </div>
+                            <div class="db-response mt-2">
+                                <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                                ${details.description}
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 mt-3">
+                                <div><b>Status:</b> ${details.status}</div>
+                                <div><b>Hours:</b> ${details.hours}</div>
+                                <div><b>Capacity:</b> ${details.capacity}</div>
+                                <div><b>Current Usage:</b> ${details.current_usage}</div>
+                                <div><b>Last Maintenance:</b> ${details.last_maintenance}</div>
+                                <div><b>Next Inspection:</b> ${details.next_inspection}</div>
+                            </div>
+                            <div class="text-sm mt-2"><i class="fas fa-users mr-1"></i> Total uses: ${details.usersVisited}</div>
+                            <button class="mt-2 px-2 py-1 text-white rounded w-full" 
+                                    style="background-color: ${color}">
+                                <i class="fas fa-bell mr-1"></i> Request Maintenance
+                            </button>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Beach area toggle functionality
+            document.querySelectorAll('.area-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    const areaId = this.dataset.area;
+                    const color = this.style.color;
+                    const area = sampleData.beachAreas.find(a => a.id == areaId);
+                    
+                    if (selectedArea === areaId) {
+                        this.classList.remove('active');
+                        map.removeLayer(beachAreaLayers[areaId]);
+                        selectedArea = null;
+                        return;
+                    }
+                    
+                    selectedArea = areaId;
+                    document.querySelectorAll('.area-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    beachAreaLayers[areaId].addTo(map);
+                    map.fitBounds(beachAreaLayers[areaId].getBounds());
+                    
+                    // Simulate fetching details from database
+                    const details = {
+                        name: beachAreaLayers[areaId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "Beach zone information retrieved from coastal management database. Boundaries verified daily.",
+                        restricted: beachAreaLayers[areaId].options.color === color,
+                        area_size: "500 sq meters",
+                        facilities: "Restrooms, Showers, Food stands",
+                        safety_level: "High",
+                        lifeguards: "2 on duty",
+                        water_quality: "Excellent",
+                        last_survey: "2023-06-01",
+                        usersVisited: area.baseVisitors
+                    };
+                    
+                    beachAreaLayers[areaId].setPopupContent(`
+                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                            <b>${details.name}</b><br>
+                            <div class="query-log mt-1">
+                                <i class="fas fa-spinner fa-spin mr-1"></i>
+                                Loading zone analytics...
+                            </div>
+                            <div class="db-response mt-2">
+                                <i class="fas fa-layer-group text-blue-500 mr-1"></i>
+                                ${details.description}
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 mt-3">
+                                <div><b>Status:</b> ${details.restricted ? '<span class="text-red-500">Restricted</span>' : '<span class="text-green-500">Open</span>'}</div>
+                                <div><b>Area Size:</b> ${details.area_size}</div>
+                                <div><b>Facilities:</b> ${details.facilities}</div>
+                                <div><b>Safety Level:</b> ${details.safety_level}</div>
+                                <div><b>Lifeguards:</b> ${details.lifeguards}</div>
+                                <div><b>Water Quality:</b> ${details.water_quality}</div>
+                            </div>
+                            <div class="text-sm mt-2"><i class="fas fa-users mr-1"></i> Total visits: ${details.usersVisited}</div>
+                            <div class="query-log mt-2">
+                                <i class="fas fa-calendar-alt mr-1"></i>
+                                Last coastal survey: ${details.last_survey}
+                            </div>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Crowded area toggle functionality
+            document.querySelectorAll('.crowded-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation();
+                    
+                    const crowdedId = this.dataset.crowded;
+                    const color = this.style.color;
+                    const area = sampleData.crowdedAreas.find(a => a.id == crowdedId);
+                    
+                    if (selectedCrowdedArea === crowdedId) {
+                        this.classList.remove('active');
+                        map.removeLayer(crowdedAreaLayers[crowdedId]);
+                        selectedCrowdedArea = null;
+                        return;
+                    }
+                    
+                    selectedCrowdedArea = crowdedId;
+                    document.querySelectorAll('.crowded-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    crowdedAreaLayers[crowdedId].addTo(map);
+                    map.fitBounds(crowdedAreaLayers[crowdedId].getBounds());
+                    
+                    // Simulate fetching details from database
+                    const details = {
+                        name: crowdedAreaLayers[crowdedId]._popup._content.split('<b>')[1].split('</b>')[0],
+                        description: "Crowd density data provided by our real-time monitoring system. Updates every 5 minutes.",
+                        level: crowdedAreaLayers[crowdedId].options.color === "#EF4444" ? "High" : 
+                              crowdedAreaLayers[crowdedId].options.color === "#F59E0B" ? "Medium" : "Low",
+                        last_updated: new Date().toLocaleTimeString(),
+                        trend: crowdedAreaLayers[crowdedId].options.color === "#EF4444" ? "Increasing" : "Stable",
+                        people_count: crowdedAreaLayers[crowdedId].options.color === "#EF4444" ? "120-150" : 
+                                    crowdedAreaLayers[crowdedId].options.color === "#F59E0B" ? "60-90" : "20-40",
+                        recommendation: crowdedAreaLayers[crowdedId].options.color === "#EF4444" ? 
+                                        "Consider alternative areas" : "Good to visit",
+                        usersVisited: area.baseVisitors
+                    };
+                    
+                    crowdedAreaLayers[crowdedId].setPopupContent(`
+                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                            <b>${details.name}</b><br>
+                            <div class="query-log mt-1">
+                                <i class="fas fa-spinner fa-spin mr-1"></i>
+                                Analyzing crowd metrics...
+                            </div>
+                            <div class="db-response mt-2">
+                                <i class="fas fa-chart-line text-purple-500 mr-1"></i>
+                                ${details.description}
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 mt-3">
+                                <div><b>Crowd Level:</b> 
+                                    ${details.level === "High" ? '<span class="text-red-500">High</span>' : 
+                                      details.level === "Medium" ? '<span class="text-yellow-500">Medium</span>' : 
+                                      '<span class="text-green-500">Low</span>'}
+                                </div>
+                                <div><b>People Count:</b> ${details.people_count}</div>
+                                <div><b>Trend:</b> 
+                                    ${details.trend === "Increasing" ? '<span class="text-red-500">↑ Increasing</span>' : 
+                                      '<span class="text-green-500">→ Stable</span>'}
+                                </div>
+                                <div><b>Recommendation:</b> ${details.recommendation}</div>
+                            </div>
+                            <div class="text-sm mt-2"><i class="fas fa-users mr-1"></i> People today: ${details.usersVisited}</div>
+                            <div class="query-log mt-2">
+                                <i class="fas fa-clock mr-1"></i>
+                                Last updated: ${details.last_updated}
+                            </div>
+                            <button class="mt-2 px-2 py-1 text-white rounded w-full" 
+                                    style="background-color: ${color}">
+                                <i class="fas fa-history mr-1"></i> View Historical Data
+                            </button>
+                        </div>
+                    `).openPopup();
+                });
+            });
+            
+            // Report system functionality
+            document.querySelectorAll('.report-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation(); // Prevent event from reaching the map
+                    
+                    // Check if user has exceeded report limit
+                    if (reportCount >= maxReports) {
+                        alert(`You have reached your maximum of ${maxReports} reports. No more reports can be submitted.`);
+                        return;
+                    }
+                    
+                    const reportTypeId = this.dataset.report;
+                    const color = this.style.color;
+                    const reportType = reportTypes.find(r => r.id == reportTypeId);
+                    
+                    // Show database-like confirmation message
+                    const confirmation = confirm(`Preparing to submit ${reportType.name} report to database.\n\nReports left: ${maxReports - reportCount}\n\nContinue?`);
+                    
+                    if (!confirmation) {
+                        alert("Report cancelled. No changes made.");
+                        return;
+                    }
+                    
+                    alert(`Please click on the map location to submit ${reportType.name} report.`);
+                    
+                    map.once('click', async function(e) {
+                        const lat = e.latlng.lat;
+                        const lng = e.latlng.lng;
+                        
+                        // Create marker
+                        const marker = L.marker([lat, lng], { 
+                            icon: L.icon({ 
+                                iconUrl: 'https://img.icons8.com/color/48/report.png', 
+                                iconSize: [30, 30],
+                                iconAnchor: [15, 15]
+                            }) 
+                        }).bindPopup(`
+                            <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                                <div class="query-log">
+                                    <i class="fas fa-spinner fa-spin mr-1"></i>
+                                    Preparing to save report...
+                                </div>
+                                <b>Report Type: ${reportType.name}</b><br>
+                                Location: [${lat.toFixed(4)}, ${lng.toFixed(4)}]<br>
+                                <button class="mt-2 px-2 py-1 text-white rounded confirm-report-btn" 
+                                        style="background-color: ${color}"
+                                        data-report="${reportType.id}" data-lat="${lat}" data-lng="${lng}">
+                                    <i class="fas fa-save mr-1"></i> Save Report
+                                </button>
+                            </div>
+                        `).addTo(map).openPopup();
+                        
+                        // Handle confirm report button
+                        marker.on('popupopen', function() {
+                            document.querySelector('.confirm-report-btn')?.addEventListener('click', async function(e) {
+                                e.stopPropagation();
+                                
+                                try {
+                                    // Show database operation in progress
+                                    marker.setPopupContent(`
+                                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                                            <div class="query-log">
+                                                <i class="fas fa-spinner fa-spin mr-1"></i>
+                                                Saving report data...
+                                            </div>
+                                            <div class="text-center my-2">
+                                                Processing your submission...
+                                            </div>
+                                        </div>
+                                    `).openPopup();
+                                    
+                                    // Simulate API call to database
+                                    await new Promise(resolve => setTimeout(resolve, 1500));
+                                    
+                                    // Increment report count
+                                    reportCount++;
+                                    
+                                    marker.setPopupContent(`
+                                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                                            <div class="query-log">
+                                                <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                                                Report saved successfully
+                                            </div>
+                                            <div class="db-response mt-2">
+                                                <b>Thank you for your report!</b><br>
+                                                <table class="text-sm mt-1">
+                                                    <tr><td>Type:</td><td>${reportType.name}</td></tr>
+                                                    <tr><td>Location:</td><td>[${lat.toFixed(4)}, ${lng.toFixed(4)}]</td></tr>
+                                                    <tr><td>Report ID:</td><td>${Math.floor(Math.random() * 10000)}</td></tr>
+                                                    <tr><td>Timestamp:</td><td>${new Date().toLocaleString()}</td></tr>
+                                                </table>
+                                            </div>
+                                            <div class="query-log mt-2">
+                                                <i class="fas fa-info-circle mr-1"></i>
+                                                Our team will review this report
+                                            </div>
+                                            <div class="text-sm mt-1">
+                                                <i class="fas fa-chart-bar mr-1"></i>
+                                                Reports left: ${maxReports - reportCount}
+                                            </div>
+                                        </div>
+                                    `).openPopup();
+                                } catch (error) {
+                                    console.error('Submission error:', error);
+                                    marker.setPopupContent(`
+                                        <div style="border-left: 4px solid ${color}; padding-left: 8px;">
+                                            <div class="query-log bg-red-100">
+                                                <i class="fas fa-exclamation-triangle text-red-500 mr-1"></i>
+                                                Error saving report
+                                            </div>
+                                            <div class="db-response mt-2">
+                                                <b>Error submitting report</b><br>
+                                                Please try again later
+                                            </div>
+                                        </div>
+                                    `).openPopup();
+                                }
+                            });
+                        });
+                    });
+                });
+            });
+        }
+
+        // Start the application by fetching data
+        fetchData();
+    </script>
+</body>
+</html>
